@@ -169,7 +169,7 @@ class CTPP2 {
 		int json(const char *json, unsigned int length);
 		int loadUDF(const char *filename);
 		static void php2cdt(zval *var, CTPP::CDT *param);
-		static zval *cdt2php(const CTPP::CDT *cdt);
+		static void cdt2php(zval *var, const CTPP::CDT *cdt);
 		static void json2cdt(const char *json, unsigned int length, CTPP::CDT *cdt);
 		CTPP2 *reset();
 		Bytecode *parse(zval *text, const char *filename, Bytecode::SourceType type);
@@ -179,7 +179,6 @@ class CTPP2 {
 		void bind(const char *name, zval *func);
 		void bind(CTPP::SyscallHandler *sys);
 		void unbind(const char *name);
-		CTPP2 *setIncludeDirs(STLW::vector<STLW::string> &include_dirs);
 		CTPP2 *setIncludeDirs(::HashTable *include_dirs);
 		~CTPP2();
 };

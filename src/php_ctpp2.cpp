@@ -7,7 +7,7 @@ static zend_function_entry functions[] = {
 };
 
 static const zend_module_dep ctpp2_deps[] = {
-	{NULL, NULL, NULL}
+	ZEND_MOD_END
 };
 
 zend_module_entry ctpp2_module_entry = {
@@ -66,7 +66,9 @@ PHP_RSHUTDOWN_FUNCTION(ctpp2) {
 }
 
 PHP_MINFO_FUNCTION(ctpp2) {
-	
+	php_info_print_table_start();
+	php_info_print_table_header(2, "CTPP2", "enabled");
+	php_info_print_table_end();
 }
 
 // CTPP2 Impl
@@ -92,49 +94,38 @@ static zend_function_entry php_ctpp2_methods[] = {
 	PHP_FE_END
 };
 
-static void php_ctpp2_free_storage(void *object TSRMLS_DC) {
-	php_ctpp2_object *obj = (php_ctpp2_object *) object; 
+static void php_ctpp2_free_storage(zend_object *object TSRMLS_DC) {
+	php_ctpp2_object *obj = Z_FETCH_CUSTOM_OBJ(php_ctpp2_object, object);
+	zend_object_std_dtor(&obj->std);
 	if (obj->ctpp) {
 		delete obj->ctpp;
 		obj->ctpp = NULL;
 	}
-	zend_hash_destroy(obj->std.properties);
-	FREE_HASHTABLE(obj->std.properties);
-	efree(obj);
 }
 
-static zend_object_value php_ctpp2_create_handler(zend_class_entry *type TSRMLS_DC) {
-	zend_object_value retval;
-	
-	php_ctpp2_object *obj = (php_ctpp2_object *) emalloc(sizeof(php_ctpp2_object));
-	memset(obj, 0, sizeof(php_ctpp2_object));
-	obj->std.ce = type; 
-	
-	ALLOC_HASHTABLE(obj->std.properties);
-	zend_hash_init(obj->std.properties, 0, NULL, ZVAL_PTR_DTOR, 0);
-	
-	object_properties_init(&(obj->std), php_ctpp2_ce);
-	
-	retval.handle   = zend_objects_store_put(obj, NULL, php_ctpp2_free_storage, NULL TSRMLS_CC);
-	retval.handlers = &php_ctpp2_object_handlers;
-	return retval;
+static zend_object *php_ctpp2_create_handler(zend_class_entry *ce TSRMLS_DC) {
+	php_ctpp2_object *intern = (php_ctpp2_object *) ecalloc(1, sizeof(struct php_ctpp2_object) + zend_object_properties_size(ce));
+	zend_object_std_init(&intern->std, ce);
+	object_properties_init(&intern->std, ce);
+	intern->ctpp = NULL;
+	intern->std.handlers = &php_ctpp2_object_handlers;
+	return &intern->std;
 }
 
 static void init_ctpp2_class() {
 	zend_class_entry ce;
-	
-	INIT_CLASS_ENTRY(ce, CTPP2_CLASS_NAME, php_ctpp2_methods);
-	php_ctpp2_ce = zend_register_internal_class(&ce TSRMLS_CC);
-	php_ctpp2_ce->create_object = php_ctpp2_create_handler;
 	memcpy(&php_ctpp2_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+	INIT_CLASS_ENTRY(ce, CTPP2_CLASS_NAME, php_ctpp2_methods);
+	ce.create_object = php_ctpp2_create_handler;
+	php_ctpp2_object_handlers.offset = XtOffsetOf(php_ctpp2_object, std);
+	php_ctpp2_object_handlers.free_obj = php_ctpp2_free_storage;
 	php_ctpp2_object_handlers.clone_obj = NULL;
-	php_ctpp2_ce->ce_flags |= ZEND_ACC_FINAL_CLASS;
+	php_ctpp2_ce = zend_register_internal_class(&ce);
 }
 
 // Конструктор
 PHP_METHOD(CTPP2, __construct) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
 	const char *charset_src = "", *charset_dst = "";
 	
@@ -143,50 +134,43 @@ PHP_METHOD(CTPP2, __construct) {
 		steps_limit = CTPP_G(steps_limit), 
 		max_functions = CTPP_G(max_functions);
 	
-	zval **entry, *args = NULL;
-	
+	zval *args = NULL;
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|a", &args) != SUCCESS)
 		WRONG_PARAM_COUNT; 
 	
-	if (args) {
+	if (args&&0) {
 		::HashTable *hash = Z_ARRVAL_P(args);
-		HashPosition pos;
-			
-		char *key;
-		uint klen;
-		ulong index;
 		
-		zend_hash_internal_pointer_reset_ex(hash, &pos);
-		while (zend_hash_get_current_data_ex(hash, (void **)&entry, &pos) == SUCCESS) {
-			if (zend_hash_get_current_key_ex(hash, &key, &klen, &index, 0, &pos) == HASH_KEY_IS_STRING && Z_TYPE_PP(entry)) {
-				if (!strcmp(key, "arg_stack_size")) {
-					if (Z_TYPE_PP(entry) != IS_LONG)
-						convert_to_long(*entry);
-					arg_stack_size = Z_LVAL_PP(entry);
-				} else if (!strcmp(key, "code_stack_size")) {
-					if (Z_TYPE_PP(entry) != IS_LONG)
-						convert_to_long(*entry);
-					code_stack_size = Z_LVAL_PP(entry);
-				} else if (!strcmp(key, "steps_limit")) {
-					if (Z_TYPE_PP(entry) != IS_LONG)
-						convert_to_long(*entry);
-					steps_limit = Z_LVAL_PP(entry);
-				} else if (!strcmp(key, "max_functions")) {
-					if (Z_TYPE_PP(entry) != IS_LONG)
-						convert_to_long(*entry);
-					max_functions = Z_LVAL_PP(entry);
-				} else if (!strcmp(key, "charset_dst")) {
-					if (Z_TYPE_PP(entry) != IS_STRING)
-						convert_to_string(*entry);
-					charset_dst = Z_STRVAL_PP(entry);
-				} else if (!strcmp(key, "charset_src")) {
-					if (Z_TYPE_PP(entry) != IS_STRING)
-						convert_to_string(*entry);
-					charset_src = Z_STRVAL_PP(entry);
+		ulong num_key; zend_string *key; zval *val;
+		ZEND_HASH_FOREACH_KEY_VAL(hash, num_key, key, val) {
+			if (key) {
+				if (!strcmp(key->val, "arg_stack_size")) {
+					if (Z_TYPE_P(val) != IS_LONG)
+						convert_to_long(val);
+					arg_stack_size = Z_LVAL_P(val);
+				} else if (!strcmp(key->val, "code_stack_size")) {
+					if (Z_TYPE_P(val) != IS_LONG)
+						convert_to_long(val);
+					code_stack_size = Z_LVAL_P(val);
+				} else if (!strcmp(key->val, "steps_limit")) {
+					if (Z_TYPE_P(val) != IS_LONG)
+						convert_to_long(val);
+					steps_limit = Z_LVAL_P(val);
+				} else if (!strcmp(key->val, "max_functions")) {
+					if (Z_TYPE_P(val) != IS_LONG)
+						convert_to_long(val);
+					max_functions = Z_LVAL_P(val);
+				} else if (!strcmp(key->val, "charset_dst")) {
+					if (Z_TYPE_P(val) != IS_STRING)
+						convert_to_string(val);
+					charset_dst = Z_STRVAL_P(val);
+				} else if (!strcmp(key->val, "charset_src")) {
+					if (Z_TYPE_P(val) != IS_STRING)
+						convert_to_string(val);
+					charset_src = Z_STRVAL_P(val);
 				}
-				zend_hash_move_forward_ex(hash, &pos);
 			}
-		}
+		} ZEND_HASH_FOREACH_END();
 	}
 		
 	obj->ctpp = new CTPP2(
@@ -201,8 +185,7 @@ PHP_METHOD(CTPP2, __construct) {
 
 // Задать директории поиска шаблонов
 PHP_METHOD(CTPP2, setIncludeDirs) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	zval *dirs;
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "a", &dirs) != SUCCESS)
 		WRONG_PARAM_COUNT;
@@ -212,8 +195,7 @@ PHP_METHOD(CTPP2, setIncludeDirs) {
 
 // Распарсить шаблон из строки
 PHP_METHOD(CTPP2, parseText) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
 	zval *source;
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &source) != SUCCESS)
@@ -229,14 +211,13 @@ PHP_METHOD(CTPP2, parseText) {
 
 // Распарсить шаблон из файла
 PHP_METHOD(CTPP2, parseTemplate) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
-	const char *filename; int filename_len;
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &filename, &filename_len) != SUCCESS)
+	zend_string *filename;;
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &filename) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
-	Bytecode *b = obj->ctpp->parse(NULL, filename, Bytecode::T_SOURCE);
+	Bytecode *b = obj->ctpp->parse(NULL, filename->val, Bytecode::T_SOURCE);
 	if (b) {
 		ZEND_REGISTER_RESOURCE(return_value, b, le_ctpp_bytecode);
 	} else {
@@ -246,14 +227,13 @@ PHP_METHOD(CTPP2, parseTemplate) {
 
 // Загрузить байткод из файла
 PHP_METHOD(CTPP2, loadBytecode) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
-	const char *filename; int filename_len;
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &filename, &filename_len) != SUCCESS)
+	zend_string *filename;
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &filename) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
-	Bytecode *b = obj->ctpp->parse(NULL, filename, Bytecode::T_BYTECODE);
+	Bytecode *b = obj->ctpp->parse(NULL, filename->val, Bytecode::T_BYTECODE);
 	if (b) {
 		ZEND_REGISTER_RESOURCE(return_value, b, le_ctpp_bytecode);
 	} else {
@@ -263,8 +243,7 @@ PHP_METHOD(CTPP2, loadBytecode) {
 
 // Загрузить байткод из строки
 PHP_METHOD(CTPP2, loadBytecodeString) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
 	zval *source;
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &source) != SUCCESS)
@@ -280,68 +259,59 @@ PHP_METHOD(CTPP2, loadBytecodeString) {
 
 // Отрендерить шаблон и вернуть в виде строки
 PHP_METHOD(CTPP2, output) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
-	int charset_src_len, charset_dst_len;
-	const char *charset_src = NULL, *charset_dst = NULL;
-	
+	zend_string *charset_src = NULL, *charset_dst = NULL;
 	zval *bytecode;
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r|ss", &bytecode, &charset_src, &charset_src_len, &charset_dst, &charset_dst_len) != SUCCESS)
+	
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r|SS", &bytecode, &charset_src, &charset_dst) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
 	Bytecode *b = NULL;
 	ZEND_FETCH_RESOURCE(b, Bytecode *, &bytecode, -1, (char *) "CTPP_BYTECODE", le_ctpp_bytecode);
-	obj->ctpp->output(return_value, b, charset_src, charset_dst);
+	obj->ctpp->output(return_value, b, charset_src ? charset_src->val : NULL, charset_dst ? charset_dst->val : NULL);
 }
 
 // Отрендерить шаблон и вывести в поток
 PHP_METHOD(CTPP2, display) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
-	int charset_src_len, charset_dst_len;
-	const char *charset_src = NULL, *charset_dst = NULL;
-	
+	zend_string *charset_src = NULL, *charset_dst = NULL;
 	zval *bytecode;
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r|ss", &bytecode, &charset_src, &charset_src_len, &charset_dst, &charset_dst_len) != SUCCESS)
+	
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r|SS", &bytecode, &charset_src, &charset_dst) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
 	Bytecode *b = NULL;
 	ZEND_FETCH_RESOURCE(b, Bytecode *, &bytecode, -1, (char *) "CTPP_BYTECODE", le_ctpp_bytecode);
-	obj->ctpp->output(NULL, b, charset_src, charset_dst);
-	RETURN_ZVAL(object, true, false);
+	obj->ctpp->output(NULL, b, charset_src ? charset_src->val : NULL, charset_dst ? charset_dst->val : NULL);
 }
 
 // Задампить текущие переменные
 PHP_METHOD(CTPP2, dump) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	obj->ctpp->dumpParams(return_value);
 }
 
 // Задампить последнюю ошибку
 PHP_METHOD(CTPP2, getLastError) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	obj->ctpp->getLastError(return_value);
 }
 
 // Задать параметры из JSON строки
 PHP_METHOD(CTPP2, json) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
-	const char *json; int json_len;
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &json, &json_len) != SUCCESS)
+	Z_METHOD_PARAMS(php_ctpp2_object);
+	zend_string *json;
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &json) != SUCCESS)
 		WRONG_PARAM_COUNT;
-	obj->ctpp->json(json, json_len);
+	obj->ctpp->json(json->val, json->len);
 	RETURN_ZVAL(object, true, false);
 }
 
 // Задать параметры из хэша
 PHP_METHOD(CTPP2, param) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	zval *params;
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "a", &params) != SUCCESS)
 		WRONG_PARAM_COUNT;
@@ -351,63 +321,57 @@ PHP_METHOD(CTPP2, param) {
 
 // Сбросить текущие параметры
 PHP_METHOD(CTPP2, reset) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	obj->ctpp->reset();
 	RETURN_ZVAL(object, true, false);
 }
 
 // Забиндить функцию в CTPP2
 PHP_METHOD(CTPP2, bind) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
 	zval *callback;
-	int function_name_len;
-	const char *function_name;
+	zend_string *function_name;
 	
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "sz", &function_name, &function_name_len, &callback) != SUCCESS)
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "Sz", &function_name, &callback) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
 	if (!zend_is_callable(callback, 0, NULL TSRMLS_CC)) {
 		php_error(E_WARNING, "CTPP2: is not callable!");
 	} else {
-		obj->ctpp->bind(function_name, callback);
+		obj->ctpp->bind(function_name->val, callback);
 	}
 	RETURN_ZVAL(object, true, false);
 }
 
 // Удалить функцию в CTPP2
 PHP_METHOD(CTPP2, unbind) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
-	int function_name_len;
-	const char *function_name;
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &function_name, &function_name_len) != SUCCESS)
+	Z_METHOD_PARAMS(php_ctpp2_object);
+	zend_string *function_name;
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &function_name) != SUCCESS)
 		WRONG_PARAM_COUNT;
-	obj->ctpp->unbind(function_name);
+	obj->ctpp->unbind(function_name->val);
 	RETURN_ZVAL(object, true, false);
 }
 
 // Задампить байткод в строку
 PHP_METHOD(CTPP2, saveBytecode) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
 	zval *bytecode;
-	const char *path; int path_len;
+	zend_string *path;
 	
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "rs", &bytecode, &path, &path_len) != SUCCESS)
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "rS", &bytecode, &path) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
 	Bytecode *b = NULL;
 	ZEND_FETCH_RESOURCE(b, Bytecode *, &bytecode, -1, (char *) "CTPP_BYTECODE", le_ctpp_bytecode);
 	if (b && b->check()) {
-		if (php_check_open_basedir(path TSRMLS_CC)) {
+		if (php_check_open_basedir(path->val TSRMLS_CC)) {
 			php_error(E_WARNING, "CTPP2::%s(): open_basedir restriction.", get_active_function_name(TSRMLS_C));
 			RETURN_BOOL(0);
 		} else {
-			b->save(path);
+			b->save(path->val);
 			RETURN_BOOL(1);
 		}
 	} else {
@@ -418,8 +382,7 @@ PHP_METHOD(CTPP2, saveBytecode) {
 
 // Сохранить байткод в файл
 PHP_METHOD(CTPP2, dumpBytecode) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
 	zval *bytecode;
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r", &bytecode) != SUCCESS)
@@ -428,7 +391,7 @@ PHP_METHOD(CTPP2, dumpBytecode) {
 	Bytecode *b = NULL;
 	ZEND_FETCH_RESOURCE(b, Bytecode *, &bytecode, -1, (char *) "CTPP_BYTECODE", le_ctpp_bytecode);
 	if (b && b->check()) {
-		RETURN_STRINGL(b->data(), b->length(), 1);
+		RETURN_STRINGL(b->data(), b->length());
 	} else {
 		php_error(E_WARNING, "CTPP2: invalid bytecode!");
 		RETURN_NULL();
@@ -437,8 +400,7 @@ PHP_METHOD(CTPP2, dumpBytecode) {
 
 // Уничтожить байткод
 PHP_METHOD(CTPP2, freeBytecode) {
-	zval *object = getThis();
-	php_ctpp2_object *obj = (php_ctpp2_object *) zend_object_store_get_object(object TSRMLS_CC);
+	Z_METHOD_PARAMS(php_ctpp2_object);
 	
 	zval *bytecode;
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r", &bytecode) != SUCCESS)
@@ -456,9 +418,9 @@ PHP_METHOD(CTPP2, freeBytecode) {
 
 // resource
 static ZEND_RSRC_DTOR_FUNC(php_ctpp2_destroy_bytecode) {
-	if (rsrc->ptr != NULL) {
-		Bytecode *b = (Bytecode *) (rsrc->ptr);
+	if (res->ptr != NULL) {
+		Bytecode *b = (Bytecode *) (res->ptr);
 		delete b;
-		rsrc->ptr = NULL;
+		res->ptr = NULL;
 	}
 }

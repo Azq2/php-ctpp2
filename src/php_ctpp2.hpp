@@ -4,6 +4,7 @@
 #define PHP_CTPP2_EXTNAME  "ctpp2"
 
 #include "ctpp2.hpp"
+#include "utils.hpp"
 
 extern "C" {
 	#ifdef HAVE_CONFIG_H
@@ -21,7 +22,6 @@ extern "C" {
 #include "ext/standard/info.h"
 
 #define CTPP2_CLASS_NAME "CTPP2"
-
 static int le_ctpp_bytecode;
 
 ZEND_BEGIN_MODULE_GLOBALS(ctpp2)
@@ -40,8 +40,8 @@ ZEND_END_MODULE_GLOBALS(ctpp2)
 #endif
 
 struct php_ctpp2_object {
-	zend_object std; 
 	CTPP2 *ctpp;
+	zend_object std;
 };
 
 zend_class_entry *php_ctpp2_ce;
@@ -75,6 +75,6 @@ PHP_METHOD(CTPP2, bind);
 PHP_METHOD(CTPP2, unbind);
 
 static void php_ctpp2_free_storage(void *object TSRMLS_DC);
-static zend_object_value php_ctpp2_create_handler(zend_class_entry *type TSRMLS_DC);
+static zend_object *php_ctpp2_create_handler(zend_class_entry *type TSRMLS_DC);
 static void init_ctpp2_class();
 static ZEND_RSRC_DTOR_FUNC(php_ctpp2_destroy_bytecode);

@@ -7,26 +7,22 @@ CTPPPHPSyscallHandler::CTPPPHPSyscallHandler(const char *func_name, zval *sub) {
 	callback = sub;
 	Z_ADDREF_P(callback);
 }
+
 INT_32 CTPPPHPSyscallHandler::Handler(CDT *args, const UINT_32 args_n, CDT &ret, Logger &logger) {
-	zval *function_name = NULL, *retval = NULL, 
-		**params = (zval **) ecalloc(args_n, sizeof(zval *));
-	
-	ALLOC_ZVAL(function_name);
-	ZVAL_STRING(function_name, name, 1);
+	zval retval, *params = (zval *) ecalloc(args_n, sizeof(zval));
 	
 	for (unsigned int i = args_n, j = 0; i-- > 0; ) {
-		params[j] = CTPP2::cdt2php(&args[i]);
-		Z_SET_REFCOUNT_P(params[j], 1);
+		CTPP2::cdt2php(&params[j], &args[i]);
+		Z_TRY_ADDREF_P(&params[j]);
 		++j;
 	}
 	
-	ALLOC_ZVAL(retval);
-	if (call_user_function(CG(function_table), NULL, callback, retval, args_n, params TSRMLS_CC) != SUCCESS) {
+	if (call_user_function(CG(function_table), NULL, callback, &retval, args_n, params TSRMLS_CC) != SUCCESS) {
 		php_error(E_ERROR, "CTPPPHPSyscallHandler: Some bullshit when callings PHP function. ");
 	} else {
-		CTPP2::php2cdt(retval, &ret);
+		CTPP2::php2cdt(&retval, &ret);
 	}
-	FREE_ZVAL(retval);
+	
 	return 0;
 }
 CCHAR_P CTPPPHPSyscallHandler::GetName() const {
@@ -85,13 +81,10 @@ CTPPPHPVarOutputCollector::CTPPPHPVarOutputCollector(zval *v) {
 }
 INT_32 CTPPPHPVarOutputCollector::Collect(const void *raw, const UINT_32 len) {
 	if (len) {
-		if (Z_STRLEN_P(this->var) == 0)
-			Z_STRVAL_P(this->var) = NULL;
-		
-		Z_STRVAL_P(this->var) = (char *) erealloc(Z_STRVAL_P(this->var), Z_STRLEN_P(this->var) + len + 1);
-		memcpy(Z_STRVAL_P(this->var) + Z_STRLEN_P(this->var), raw, len);
-		Z_STRLEN_P(this->var) += len;
-		Z_STRVAL_P(this->var)[Z_STRLEN_P(this->var)] = 0;
+		zend_string *str = Z_STR_P(this->var);
+		str = zend_string_extend(str, str->len + len, 0);
+		memcpy(str->val + str->len - len, raw, len);
+		Z_STR_P(this->var) = str;
 	}
 	return 0;
 }
@@ -99,7 +92,7 @@ CTPPPHPVarOutputCollector::~CTPPPHPVarOutputCollector() throw() { }
 
 // CTPP2
 CTPP2::CTPP2(unsigned int arg_stack_size, unsigned int code_stack_size, unsigned int steps_limit, unsigned int max_functions, 
-	STLW::string src_charset, STLW::string dst_charset) {
+		STLW::string src_charset, STLW::string dst_charset) {
 	try {
 		params = new CDT(CDT::HASH_VAL);
 		syscalls = new SyscallFactory(max_functions);
@@ -125,8 +118,6 @@ CTPP2::CTPP2(unsigned int arg_stack_size, unsigned int code_stack_size, unsigned
 			cpp_free(syscalls);
 		}
 		cpp_free(vm);
-		
-		php_error(E_ERROR, "CTPP2: Unrecoverable error at %s:%d (%s)", __FILE__, __LINE__, __FUNCTION__);
 	}
 }
 
@@ -200,19 +191,19 @@ Bytecode *CTPP2::parse(zval *text, const char *filename, Bytecode::SourceType ty
 }
 
 CTPP2 *CTPP2::setIncludeDirs(::HashTable *hash) {
-	zval **entry;
-	HashPosition pos;
-	
 	size_t i = 0;
-	zend_hash_internal_pointer_reset_ex(hash, &pos);
-	while (zend_hash_get_current_data_ex(hash, (void **)&entry, &pos) == SUCCESS) {
-		if (Z_TYPE_PP(entry) != IS_STRING) {
-			php_error(E_WARNING, "CTPP2: Not string at array index %ld", i);
-		} else {
-			this->include_dirs.push_back(STLW::string(Z_STRVAL_PP(entry), Z_STRLEN_PP(entry)));
-		}
-		zend_hash_move_forward_ex(hash, &pos);
-		++i;
+	zend_string *key;
+	ulong num_key;
+	zval *val;
+	if (hash) {
+		ZEND_HASH_FOREACH_KEY_VAL(hash, num_key, key, val) {
+			if (Z_TYPE_P(val) != IS_STRING) {
+				php_error(E_WARNING, "CTPP2: Not string at array index %ld", i);
+			} else {
+				this->include_dirs.push_back(STLW::string(Z_STRVAL_P(val), Z_STRLEN_P(val)));
+			}
+			++i;
+		} ZEND_HASH_FOREACH_END();
 	}
 	return this;
 }
@@ -240,7 +231,7 @@ void CTPP2::output(zval *out, Bytecode *bytecode, const char *src_enc, const cha
 				vm->Init(bytecode->getCode(), &output_collector, &logger);
 				vm->Run(bytecode->getCode(), &output_collector, IP, *params, &logger);
 				
-				ZVAL_STRINGL(out, result.data(), result.length(), 1);
+				ZVAL_STRINGL(out, result.data(), result.length());
 				return;
 			} else {
 				CTPPPerlLogger logger;
@@ -313,7 +304,8 @@ void CTPP2::output(zval *out, Bytecode *bytecode, const char *src_enc, const cha
 		php_error(E_WARNING, "CTPP2::output(): %s (error code 0x%08X); IP: 0x%08X", error.error_descr.c_str(), error.error_code, error.ip);
 	}
 	
-	ZVAL_BOOL(out, 0);
+	if (out)
+		ZVAL_BOOL(out, 0);
 }
 
 CTPP2::~CTPP2() {
@@ -332,9 +324,9 @@ CTPP2::~CTPP2() {
 void CTPP2::dumpParams(zval *out) {
 	try {
 		STLW::string str = params->RecursiveDump();
-		ZVAL_STRINGL(out, str.data(), str.length(), 1);
+		ZVAL_STRINGL(out, str.data(), str.length());
 	} catch (...) {
-		ZVAL_STRINGL(out, "", 0, 1);
+		ZVAL_STRINGL(out, "", 0);
 		php_error(E_WARNING, "CTPP2: Dump params failed. ");
 	}
 }
@@ -370,12 +362,12 @@ int CTPP2::json(const char *json, unsigned int length) {
 
 void CTPP2::getLastError(zval *var) {
 	array_init(var);
-	add_assoc_stringl_ex(var, cdlen("template_name"), (char *) error.template_name.c_str(), error.template_name.size(), 1);
-	add_assoc_long_ex(var, cdlen("line"), error.line);
-	add_assoc_long_ex(var, cdlen("pos"), error.pos);
-	add_assoc_long_ex(var, cdlen("ip"), error.ip);
-	add_assoc_long_ex(var, cdlen("error_code"), error.error_code);
-	add_assoc_stringl_ex(var, cdlen("error_str"), (char *) error.error_descr.c_str(), error.error_descr.size(), 1);
+	add_assoc_stringl_ex(var, cslen("template_name"), (char *) error.template_name.c_str(), error.template_name.size());
+	add_assoc_long_ex(var, cslen("line"), error.line);
+	add_assoc_long_ex(var, cslen("pos"), error.pos);
+	add_assoc_long_ex(var, cslen("ip"), error.ip);
+	add_assoc_long_ex(var, cslen("error_code"), error.error_code);
+	add_assoc_stringl_ex(var, cslen("error_str"), (char *) error.error_descr.c_str(), error.error_descr.size());
 }
 
 void CTPP2::json2cdt(const char *json, unsigned int length, CDT *cdt) {
@@ -383,10 +375,7 @@ void CTPP2::json2cdt(const char *json, unsigned int length, CDT *cdt) {
 	jparser.Parse(json, json + length);
 }
 
-zval *CTPP2::cdt2php(const CDT *cdt) {
-	zval *ret;
-	ALLOC_ZVAL(ret);
-	
+void CTPP2::cdt2php(zval *ret, const CDT *cdt) {
 	switch (cdt->GetType()) {
 		case CDT::INT_VAL:
 			ZVAL_LONG(ret, cdt->GetInt());
@@ -399,23 +388,29 @@ zval *CTPP2::cdt2php(const CDT *cdt) {
 		case CDT::STRING_REAL_VAL:
 		case CDT::STRING_INT_VAL:
 		case CDT::STRING_VAL:
-			ZVAL_STRINGL(ret, cdt->GetString().c_str(), cdt->GetString().size(), 1);
+			ZVAL_STRINGL(ret, cdt->GetString().c_str(), cdt->GetString().size());
 		break;
 		
 		case CDT::ARRAY_VAL:
 		{
 			array_init(ret);
 			unsigned int array_size = cdt->Size();
-			for (unsigned i = 0; i < array_size; ++i)
-				add_index_zval(ret, i, cdt2php(&(*cdt)[i]));
+			for (unsigned i = 0; i < array_size; ++i) {
+				zval val;
+				cdt2php(&val, &(*cdt)[i]);
+				add_index_zval(ret, i, &val);
+			}
 		}
 		break;
 		
 		case CDT::HASH_VAL:
 		{
 			array_init(ret);
-			for (CDT::ConstIterator it = cdt->Begin(), end = cdt->End(); it != end; ++it)
-				add_assoc_zval_ex(ret, it->first.c_str(), it->first.size() + 1, cdt2php(&it->second));
+			for (CDT::ConstIterator it = cdt->Begin(), end = cdt->End(); it != end; ++it) {
+				zval val;
+				cdt2php(&val, &it->second);
+				add_assoc_zval_ex(ret, it->first.c_str(), it->first.size() + 1, &val);
+			}
 		}
 		break;
 		
@@ -423,7 +418,6 @@ zval *CTPP2::cdt2php(const CDT *cdt) {
 			ZVAL_NULL(ret);
 		break;
 	}
-	return ret;
 }
 
 void CTPP2::php2cdt(zval *var, CDT *cdt) {
@@ -449,24 +443,33 @@ void CTPP2::php2cdt(zval *var, CDT *cdt) {
 			php2cdt(Z_REFVAL_P(var), cdt);
 		break;
 #endif
+
+#ifdef IS_BOOL
 		case IS_BOOL:
 			cdt->operator=(Z_LVAL_P(var) != 0);
 		break;
+#else
+		case IS_TRUE:
+			cdt->operator=(1);
+		break;
 		
+		case IS_FALSE:
+			cdt->operator=(0);
+		break;
+#endif
+
 		case IS_NULL:
 			// Nothing
 		break;
 		
 		default:
 			if (Z_TYPE_P(var) == IS_OBJECT && zend_is_callable(var, 0, NULL TSRMLS_CC)) {
-				zval *retval = NULL;
-				ALLOC_ZVAL(retval);
-				if (call_user_function(CG(function_table), NULL, var, retval, 0, NULL TSRMLS_CC) != SUCCESS) {
+				zval retval;
+				if (call_user_function(CG(function_table), NULL, var, &retval, 0, NULL TSRMLS_CC) != SUCCESS) {
 					php_error(E_WARNING, "php2cdt: Something bullshit when calling PHP function. ");
 				} else {
-					CTPP2::php2cdt(retval, cdt);
+					CTPP2::php2cdt(&retval, cdt);
 				}
-				FREE_ZVAL(retval);
 			} else {
 				// Пытаемся сконвертить в строку
 				convert_to_string(var);
@@ -480,28 +483,21 @@ void CTPP2::php2cdt(zval *var, CDT *cdt) {
 		case IS_CONSTANT_ARRAY:
 #endif
 		{
-			zval **entry;	
 			::HashTable *hash = Z_ARRVAL_P(var);
-			HashPosition pos;
-			
-			char *key;
-			uint klen;
 			ulong index, last_index = 0;
 			
 			CDT::eValType type = cdt->GetType();
 			bool hash_inited = (type == CTPP::CDT::HASH_VAL || type == CTPP::CDT::ARRAY_VAL);
 			
-			zend_hash_internal_pointer_reset_ex(hash, &pos);
-			
-			while (zend_hash_get_current_data_ex(hash, (void **)&entry, &pos) == SUCCESS) {
+			zval *val; zend_string *key;
+			ZEND_HASH_FOREACH_KEY_VAL(hash, index, key, val) {
 				CTPP::CDT tmp;
-				bool is_hash = zend_hash_get_current_key_ex(hash, &key, &klen, &index, 0, &pos) == HASH_KEY_IS_STRING;
 				if (!hash_inited) {
 					// Если строковый ключ или первый элемент не 0, значит это хэш
-					type = is_hash || index != 0 ? CTPP::CDT::HASH_VAL : CTPP::CDT::ARRAY_VAL;
+					type = key || index != 0 ? CTPP::CDT::HASH_VAL : CTPP::CDT::ARRAY_VAL;
 					cdt->operator = (CTPP::CDT(type));
 					hash_inited = true;
-				} else if ((is_hash || index - last_index != 1) && type == CTPP::CDT::ARRAY_VAL) {
+				} else if ((key || index - last_index != 1) && type == CTPP::CDT::ARRAY_VAL) {
 					// Если текущий тип массив, но встретили строковый ключ или индекс не по порядку
 					// Конвертим массив в хэш
 					CTPP::CDT tmp_hash(type = CTPP::CDT::HASH_VAL);
@@ -515,19 +511,18 @@ void CTPP2::php2cdt(zval *var, CDT *cdt) {
 				last_index = index;
 				
 				if (type == CTPP::CDT::HASH_VAL) {
-					php2cdt(*entry, &tmp);
-					if (is_hash) {
-						cdt->operator[](STLW::string(key, klen - 1)) = tmp;
+					php2cdt(val, &tmp);
+					if (key) {
+						cdt->operator[](STLW::string(key->val, key->len)) = tmp;
 					} else {
 						int length = snprintf(buffer, sizeof(buffer), "%lu", index);
 						cdt->operator[](STLW::string(buffer, length)) = tmp;
 					}
 				} else {
-					php2cdt(*entry, &tmp);
+					php2cdt(val, &tmp);
 					cdt->operator[](index) = tmp;
 				}
-				zend_hash_move_forward_ex(hash, &pos);
-			}
+			} ZEND_HASH_FOREACH_END();
 		}
 		break;
 	}
