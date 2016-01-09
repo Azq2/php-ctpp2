@@ -197,16 +197,14 @@ PHP_METHOD(CTPP2, setIncludeDirs) {
 PHP_METHOD(CTPP2, parseText) {
 	Z_METHOD_PARAMS(php_ctpp2_object);
 	
-	zval *source;
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &source) != SUCCESS)
+	zend_string *source;
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &source) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
-	Bytecode *b = obj->ctpp->parse(source, "direct source", Bytecode::T_TEXT_SOURCE);
-	if (b) {
-		ZEND_REGISTER_RESOURCE(return_value, b, le_ctpp_bytecode);
-	} else {
-		RETURN_NULL();
-	}
+	RETURN_PHP_RESOURCE(
+		obj->ctpp->parse("direct source", source->val, source->len, Bytecode::T_TEXT_SOURCE), 
+		le_ctpp_bytecode
+	);
 }
 
 // Распарсить шаблон из файла
@@ -217,12 +215,10 @@ PHP_METHOD(CTPP2, parseTemplate) {
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &filename) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
-	Bytecode *b = obj->ctpp->parse(NULL, filename->val, Bytecode::T_SOURCE);
-	if (b) {
-		ZEND_REGISTER_RESOURCE(return_value, b, le_ctpp_bytecode);
-	} else {
-		RETURN_NULL();
-	}
+	RETURN_PHP_RESOURCE(
+		obj->ctpp->parse(filename->val, NULL, 0, Bytecode::T_SOURCE), 
+		le_ctpp_bytecode
+	);
 }
 
 // Загрузить байткод из файла
@@ -233,27 +229,60 @@ PHP_METHOD(CTPP2, loadBytecode) {
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &filename) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
-	Bytecode *b = obj->ctpp->parse(NULL, filename->val, Bytecode::T_BYTECODE);
-	if (b) {
-		ZEND_REGISTER_RESOURCE(return_value, b, le_ctpp_bytecode);
-	} else {
+	if (php_check_open_basedir(filename->val TSRMLS_CC)) {
+		php_error(E_WARNING, "CTPP2::%s(%s): open_basedir restriction.", filename->val, get_active_function_name(TSRMLS_C));
 		RETURN_NULL();
 	}
+	
+	RETURN_PHP_RESOURCE(
+		obj->ctpp->parse(filename->val, NULL, 0, Bytecode::T_BYTECODE), 
+		le_ctpp_bytecode
+	);
 }
 
 // Загрузить байткод из строки
 PHP_METHOD(CTPP2, loadBytecodeString) {
 	Z_METHOD_PARAMS(php_ctpp2_object);
 	
-	zval *source;
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &source) != SUCCESS)
+	zend_string *source;
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &source) != SUCCESS)
 		WRONG_PARAM_COUNT;
 	
-	Bytecode *b = obj->ctpp->parse(source, "direct bytecode", Bytecode::T_TEXT_BYTECODE);
-	if (b) {
-		ZEND_REGISTER_RESOURCE(return_value, b, le_ctpp_bytecode);
+	RETURN_PHP_RESOURCE(
+		obj->ctpp->parse("direct bytecode", source->val, source->len, Bytecode::T_TEXT_BYTECODE), 
+		le_ctpp_bytecode
+	);
+}
+
+// Задампить байткод в строку
+PHP_METHOD(CTPP2, saveBytecode) {
+	Z_METHOD_PARAMS(php_ctpp2_object);
+	
+	zval *bytecode;
+	zend_string *path;
+	
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "rS", &bytecode, &path) != SUCCESS)
+		WRONG_PARAM_COUNT;
+	
+	Bytecode *b = NULL;
+	ZEND_FETCH_RESOURCE(b, Bytecode *, &bytecode, -1, (char *) "CTPP_BYTECODE", le_ctpp_bytecode);
+	if (b && b->check()) {
+		if (php_check_open_basedir(path->val TSRMLS_CC)) {
+			php_error(E_WARNING, "CTPP2::%s(): open_basedir restriction.", get_active_function_name(TSRMLS_C));
+			RETURN_BOOL(0);
+		} else {
+			FILE *fp = fopen(path->val, "w");
+			if (!fp) {
+				php_error(E_WARNING, "CTPP2::%s(): fopen(%s): %s", get_active_function_name(TSRMLS_C), path->val, strerror(errno));
+				RETURN_BOOL(0);
+			}
+			fwrite(b->data(), b->length(), 1, fp);
+			fclose(fp);
+			RETURN_BOOL(1);
+		}
 	} else {
-		RETURN_NULL();
+		php_error(E_WARNING, "CTPP2::%s(): invalid bytecode!", get_active_function_name(TSRMLS_C));
+		RETURN_BOOL(0);
 	}
 }
 
@@ -290,13 +319,26 @@ PHP_METHOD(CTPP2, display) {
 // Задампить текущие переменные
 PHP_METHOD(CTPP2, dump) {
 	Z_METHOD_PARAMS(php_ctpp2_object);
-	obj->ctpp->dumpParams(return_value);
+	try {
+		STLW::string str = obj->ctpp->getParams()->RecursiveDump();
+		RETURN_STRINGL(str.data(), str.length());
+	} catch (...) {
+		RETURN_NULL();
+		php_error(E_WARNING, "CTPP2: Dump params failed. ");
+	}
 }
 
 // Задампить последнюю ошибку
 PHP_METHOD(CTPP2, getLastError) {
 	Z_METHOD_PARAMS(php_ctpp2_object);
-	obj->ctpp->getLastError(return_value);
+	CTPP::CTPPError *error = obj->ctpp->getLastError();
+	array_init(return_value);
+	add_assoc_stringl_ex(return_value, cslen("template_name"), (char *) error->template_name.c_str(), error->template_name.size());
+	add_assoc_long_ex(return_value, cslen("line"), error->line);
+	add_assoc_long_ex(return_value, cslen("pos"), error->pos);
+	add_assoc_long_ex(return_value, cslen("ip"), error->ip);
+	add_assoc_long_ex(return_value, cslen("error_code"), error->error_code);
+	add_assoc_stringl_ex(return_value, cslen("error_str"), (char *) error->error_descr.c_str(), error->error_descr.size());
 }
 
 // Задать параметры из JSON строки
@@ -352,32 +394,6 @@ PHP_METHOD(CTPP2, unbind) {
 		WRONG_PARAM_COUNT;
 	obj->ctpp->unbind(function_name->val);
 	RETURN_ZVAL(object, true, false);
-}
-
-// Задампить байткод в строку
-PHP_METHOD(CTPP2, saveBytecode) {
-	Z_METHOD_PARAMS(php_ctpp2_object);
-	
-	zval *bytecode;
-	zend_string *path;
-	
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "rS", &bytecode, &path) != SUCCESS)
-		WRONG_PARAM_COUNT;
-	
-	Bytecode *b = NULL;
-	ZEND_FETCH_RESOURCE(b, Bytecode *, &bytecode, -1, (char *) "CTPP_BYTECODE", le_ctpp_bytecode);
-	if (b && b->check()) {
-		if (php_check_open_basedir(path->val TSRMLS_CC)) {
-			php_error(E_WARNING, "CTPP2::%s(): open_basedir restriction.", get_active_function_name(TSRMLS_C));
-			RETURN_BOOL(0);
-		} else {
-			b->save(path->val);
-			RETURN_BOOL(1);
-		}
-	} else {
-		php_error(E_WARNING, "CTPP2::%s(): invalid bytecode!", get_active_function_name(TSRMLS_C));
-		RETURN_BOOL(0);
-	}
 }
 
 // Сохранить байткод в файл

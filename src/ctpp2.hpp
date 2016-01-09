@@ -92,7 +92,6 @@ class CTPP2RefTextSourceLoader: public CTPP::CTPP2SourceLoader {
 		CTPP::CTPP2FileSourceLoader file_loader;
 	public:
 		CTPP2RefTextSourceLoader(const char *txt, size_t len);
-		CTPP2RefTextSourceLoader(zval *txt);
 		CCHAR_P GetTemplate(UINT_32 &size);
 		
 		// Костыли для <TMPL_include>
@@ -129,14 +128,13 @@ class Bytecode {
 			return mem != NULL;
 		}
 		
-		Bytecode(STLW::vector<STLW::string> &inc_dirs, zval *text, const char *filename, SourceType type);
+		Bytecode(STLW::vector<STLW::string> &inc_dirs, const char *filename, const char *data, size_t size, SourceType type);
 		const char *data() {
 			return (const char *) exe;
 		}
 		const unsigned int length() {
 			return exe_size;
 		}
-		int save(const char *filename);
 		void free();
 		~Bytecode();
 };
@@ -172,10 +170,16 @@ class CTPP2 {
 		static void cdt2php(zval *var, const CTPP::CDT *cdt);
 		static void json2cdt(const char *json, unsigned int length, CTPP::CDT *cdt);
 		CTPP2 *reset();
-		Bytecode *parse(zval *text, const char *filename, Bytecode::SourceType type);
+		Bytecode *parse(const char *filename, const char *data, size_t size, Bytecode::SourceType type);
 		void output(zval *var, Bytecode *bytecode, const char *src_enc, const char *dst_enc);
-		void getLastError(zval *var);
-		void dumpParams(zval *var);
+		
+		CTPP::CTPPError *getLastError() {
+			return &error;
+		}
+		inline const CTPP::CDT *getParams() {
+			return params;
+		}
+		
 		void bind(const char *name, zval *func);
 		void bind(CTPP::SyscallHandler *sys);
 		void unbind(const char *name);

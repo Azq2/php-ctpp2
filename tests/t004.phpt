@@ -27,7 +27,7 @@ CTPP recoder test
 	));
 	$b = $T->parseTemplate("examples/charset_recoder.tmpl");
 	
-	if (base64_encode($T->output($b)) !== "0uXx8jog0uXx8iDq7uTo8O7i6uggQ1AxMjUxCg==")
+	if (base64_encode($T->output($b)) !== "0KLQtdGB0YI6INCi0LXRgdGCINC60L7QtNC40YDQvtCy0LrQuCBDUDEyNTEK")
 		exit("charset_recoder3: ERROR '".base64_encode($T->output($b))."'\n");
 	echo "charset_recoder3: OK\n";
 ?>

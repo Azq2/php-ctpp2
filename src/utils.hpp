@@ -10,4 +10,12 @@
 	ZVAL_RES(return_value, zend_register_resource(object, id));
 #define ZEND_FETCH_RESOURCE(obj, T, res, default_id, name, id) \
 	obj = ((T) zend_fetch_resource_ex((*(res)), name, id));
-
+#define RETURN_PHP_RESOURCE(b, le) { \
+	void *__b = (void *) (b); \
+	if (__b) { \
+		ZEND_REGISTER_RESOURCE(return_value, __b, le); \
+		return; \
+	} else { \
+		RETURN_NULL(); \
+	} \
+}

@@ -46,10 +46,6 @@ CTPP2RefTextSourceLoader::CTPP2RefTextSourceLoader(const char *txt, size_t len) 
 	text = txt;
 	length = len;
 }
-CTPP2RefTextSourceLoader::CTPP2RefTextSourceLoader(zval *txt) {
-	text = Z_STRVAL_P(txt);
-	length = Z_STRLEN_P(txt);
-}
 CCHAR_P CTPP2RefTextSourceLoader::GetTemplate(UINT_32 &size) {
 	size = length;
 	return text;
@@ -160,9 +156,9 @@ int CTPP2::loadUDF(const char *filename) {
 	php_error(E_ERROR, "CTPP2: // Nothing todo. =)\n");
 }
 
-Bytecode *CTPP2::parse(zval *text, const char *filename, Bytecode::SourceType type) {
+Bytecode *CTPP2::parse(const char *filename, const char *data, size_t size, Bytecode::SourceType type) {
 	try {
-		return new Bytecode(include_dirs, text, filename, type);
+		return new Bytecode(include_dirs, filename, data, size, type);
 	} catch (CTPPParserSyntaxError &e) {
 		error = CTPPError(filename, e.what(), CTPP_COMPILER_ERROR | CTPP_SYNTAX_ERROR, e.GetLine(), e.GetLinePos(), 0);
 	} catch (CTPPParserOperatorsMismatch& e) {
@@ -321,16 +317,6 @@ CTPP2::~CTPP2() {
 	}
 }
 
-void CTPP2::dumpParams(zval *out) {
-	try {
-		STLW::string str = params->RecursiveDump();
-		ZVAL_STRINGL(out, str.data(), str.length());
-	} catch (...) {
-		ZVAL_STRINGL(out, "", 0);
-		php_error(E_WARNING, "CTPP2: Dump params failed. ");
-	}
-}
-
 CTPP2 *CTPP2::reset() {
 	delete params;
 	params = new CDT(CDT::HASH_VAL);
@@ -358,16 +344,6 @@ int CTPP2::json(const char *json, unsigned int length) {
 			error.error_descr.c_str(), error.error_code, error.line, error.pos);
 	}
 	return  0;
-}
-
-void CTPP2::getLastError(zval *var) {
-	array_init(var);
-	add_assoc_stringl_ex(var, cslen("template_name"), (char *) error.template_name.c_str(), error.template_name.size());
-	add_assoc_long_ex(var, cslen("line"), error.line);
-	add_assoc_long_ex(var, cslen("pos"), error.pos);
-	add_assoc_long_ex(var, cslen("ip"), error.ip);
-	add_assoc_long_ex(var, cslen("error_code"), error.error_code);
-	add_assoc_stringl_ex(var, cslen("error_str"), (char *) error.error_descr.c_str(), error.error_descr.size());
 }
 
 void CTPP2::json2cdt(const char *json, unsigned int length, CDT *cdt) {
@@ -529,15 +505,13 @@ void CTPP2::php2cdt(zval *var, CDT *cdt) {
 }
 
 // Bytecode
-Bytecode::Bytecode(STLW::vector<STLW::string> &inc_dirs, zval *text, const char *filename, SourceType type) {
+Bytecode::Bytecode(STLW::vector<STLW::string> &inc_dirs, const char *filename, const char *data, size_t size, SourceType type) {
 	exe = NULL; mem = NULL;
 	
 	if (type == T_TEXT_SOURCE) {
-		if (Z_TYPE_P(text) != IS_STRING)
-			throw CTPPLogicError("Invalid template source (is not text!)");
-		CTPP2RefTextSourceLoader loader(text);
+		CTPP2RefTextSourceLoader loader(data, size);
 		loader.SetIncludeDirs(inc_dirs);
-		_compiler(loader, "direct source");
+		_compiler(loader, filename);
 	} else if (type == T_SOURCE) {
 		CTPP2FileSourceLoader loader;
 		loader.SetIncludeDirs(inc_dirs);
@@ -572,13 +546,10 @@ Bytecode::Bytecode(STLW::vector<STLW::string> &inc_dirs, zval *text, const char 
 			}
 		}
 	} else if (type == T_TEXT_BYTECODE) {
-		if (Z_TYPE_P(text) != IS_STRING)
-			throw CTPPLogicError("Invalid template bytecode (is not text!)");
-		
-		if (Z_STRLEN_P(text) < 5)
+		if (size < 5)
 			throw CTPPLogicError("File read error (truncated)");
-		exe = (VMExecutable *) malloc(Z_STRLEN_P(text));
-		memcpy(exe, Z_STRVAL_P(text), Z_STRLEN_P(text));
+		exe = (VMExecutable *) malloc(size);
+		memcpy(exe, data, size);
 		
 		if (exe->magic[0] == 'C' && exe->magic[1] == 'T' && exe->magic[2] == 'P' && exe->magic[3] == 'P') {
 			mem = new VMMemoryCore(exe);
@@ -615,21 +586,6 @@ void Bytecode::_compiler(CTPP2SourceLoader &loader, const char *name) {
 	exe = (VMExecutable *) malloc(exe_size);
 	memcpy(exe, bytecode, exe_size);
 	mem = new VMMemoryCore(exe);
-}
-int Bytecode::save(const char *filename) {
-	if (!check()) {
-		php_error(E_WARNING, "CTPP2: empty bytecode!");
-		return -1;
-	}
-	
-	FILE *fp = fopen(filename, "w");
-	if (!fp) {
-		php_error(E_WARNING, "CTPP2: fopen(%s): %s", filename, strerror(errno));
-		return -1;
-	}
-	fwrite(exe, exe_size, 1, fp);
-	fclose(fp);
-	return 0;
 }
 void Bytecode::free() {
 	c_free(exe);
