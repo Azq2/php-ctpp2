@@ -138,7 +138,7 @@ PHP_METHOD(CTPP2, __construct) {
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|a", &args) != SUCCESS)
 		WRONG_PARAM_COUNT; 
 	
-	if (args&&0) {
+	if (args) {
 		::HashTable *hash = Z_ARRVAL_P(args);
 		
 		ulong num_key; zend_string *key; zval *val;
