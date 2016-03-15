@@ -226,12 +226,19 @@ void CTPP2::output(zval *out, Bytecode *bytecode, const char *src_enc, const cha
 				StringIconvOutputCollector output_collector(result, src_charset, dst_charset, 3);
 				vm->Init(bytecode->getCode(), &output_collector, &logger);
 				vm->Run(bytecode->getCode(), &output_collector, IP, *params, &logger);
+				vm->Reset();
 				
 				ZVAL_STRINGL(out, result.data(), result.length());
 				return;
 			} else {
 				CTPPPerlLogger logger;
 				if (out) {
+				//	STLW::string result;
+				//	StringOutputCollector output_collector(result);
+				//	vm->Init(bytecode->getCode(), &output_collector, &logger);
+				//	vm->Run(bytecode->getCode(), &output_collector, IP, *params, &logger);
+				//	ZVAL_STRINGL(out, result.data(), result.length());
+					
 					CTPPPHPVarOutputCollector output_collector(out);
 					vm->Init(bytecode->mem, &output_collector, &logger);
 					vm->Run(bytecode->mem, &output_collector, IP, *params, &logger);
@@ -240,6 +247,7 @@ void CTPP2::output(zval *out, Bytecode *bytecode, const char *src_enc, const cha
 					vm->Init(bytecode->mem, &output_collector, &logger);
 					vm->Run(bytecode->mem, &output_collector, IP, *params, &logger);
 				}
+				vm->Reset();
 				return;
 			}
 		} catch (ZeroDivision &e) {
