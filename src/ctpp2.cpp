@@ -73,7 +73,7 @@ CTPPPHPOutputCollector::~CTPPPHPOutputCollector() throw() { }
 // CTPPPHPVarOutputCollector
 CTPPPHPVarOutputCollector::CTPPPHPVarOutputCollector(zval *v) {
 	this->var = v;
-	ZVAL_EMPTY_STRING(v);
+	ZVAL_STRINGL(v, "", 0);
 }
 INT_32 CTPPPHPVarOutputCollector::Collect(const void *raw, const UINT_32 len) {
 	if (len) {
